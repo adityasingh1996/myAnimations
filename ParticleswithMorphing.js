@@ -1,13 +1,14 @@
 /**
- * Morphing Particles - Mobile Friendly ES6 Module
- * * Usage:
- * import { MorphingParticles } from './morphing_particles.js';
- * new MorphingParticles({ containerId: 'my-container', ... });
+ * Morphing Particles - Background & Resize Support
+ * * Updates:
+ * 1. 'size' parameter added to options to resize the vector image.
+ * 2. Event listeners moved to window to allow 'pointer-events: none' on container.
+ * 3. Removed click/selection interference.
  */
 
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.module.js';
 
-// --- SHADER DEFINITIONS ---
+// --- SHADER DEFINITIONS (Unchanged) ---
 const NOISE_GLSL = `
 vec3 permute(vec3 x) { return mod(((x*34.0)+1.0)*x, 289.0); }
 vec4 permute(vec4 x){return mod(((x*34.0)+1.0)*x, 289.0);}
@@ -107,7 +108,6 @@ void main() {
     
     // Interaction logic
     vec2 targetPos = refPos;
-    // Only mix to nearestPos if we are hovering/touching
     targetPos = mix(targetPos, nearestPos, uIsHovering * uIsHovering);
     
     vec2 direction = normalize(targetPos - pos);
@@ -288,7 +288,6 @@ self.onmessage = function(e) {
 const linearMap = (n, e, t, i, r) => (n - e) * (r - i) / (t - e) + i;
 
 // --- ROBUST SINGLETON LOADER ---
-// Stores the Promise, not just a boolean, so multiple instances wait for the SAME load event.
 let loadPromise = null;
 
 function loadLibs() {
@@ -296,15 +295,10 @@ function loadLibs() {
 
     loadPromise = new Promise(async (resolve, reject) => {
         const load = (url) => new Promise((res, rej) => {
-            // If script tag exists, it might still be loading. We must wait for onload.
             let existingScript = document.querySelector(`script[src="${url}"]`);
             if (existingScript) {
-                // If already loaded (we can't easily check 'loaded' state on script tag, 
-                // so we check the window object that script is supposed to create)
                 if(url.includes('gsap') && window.gsap) return res();
                 if(url.includes('poisson') && window.PoissonDiskSampling) return res();
-                
-                // If not global yet, attach listener to existing script
                 existingScript.addEventListener('load', res);
                 existingScript.addEventListener('error', rej);
             } else {
@@ -335,6 +329,7 @@ export class MorphingParticles {
         this.containerId = options.containerId;
         this.imageUrl = options.imageUrl || "https://iili.io/f3MM7VV.md.png";
         this.theme = options.theme || "light";
+        this.vectorSize = options.size || 5; // New Size Parameter (default 5)
         
         // MOBILE DETECT & OPTIMIZATION
         this.isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
@@ -342,7 +337,6 @@ export class MorphingParticles {
         // Base density
         let baseDensity = options.density || 130;
         
-        // Reduce density heavily on mobile for performance
         if(this.isMobile) {
             baseDensity = Math.min(baseDensity, 80); 
         }
@@ -356,9 +350,6 @@ export class MorphingParticles {
             console.error(`MorphingParticles: Container #${this.containerId} not found.`);
             return;
         }
-
-        // OPTIMIZATION: Prevent scrolling when touching the canvas
-        this.injectStyles();
 
         this.scene = null;
         this.camera = null;
@@ -378,13 +369,6 @@ export class MorphingParticles {
         this.init();
     }
 
-    injectStyles() {
-        if(this.container) {
-            this.container.style.touchAction = 'none'; // Critical for mobile interaction
-            this.container.style.cursor = 'pointer';
-        }
-    }
-
     async init() {
         try {
             await loadLibs();
@@ -400,8 +384,6 @@ export class MorphingParticles {
     setupScene() {
         this.scene = new THREE.Scene();
         
-        // MOBILE OPTIMIZATION: Cap Pixel Ratio
-        // Retina screens (3x) kill performance with shaders. Cap at 1.5 or 2 for mobile.
         const maxPixelRatio = this.isMobile ? 1.5 : window.devicePixelRatio;
         this.pixelRatio = Math.min(window.devicePixelRatio, maxPixelRatio);
         
@@ -410,12 +392,16 @@ export class MorphingParticles {
 
         this.renderer = new THREE.WebGLRenderer({
             alpha: true,
-            antialias: !this.isMobile, // Disable AA on mobile for performance
+            antialias: !this.isMobile,
             powerPreference: "high-performance"
         });
         this.renderer.setSize(this.container.offsetWidth, this.container.offsetHeight);
         this.renderer.setPixelRatio(this.pixelRatio);
         this.renderer.domElement.style.display = 'block';
+        
+        // Removed cursor pointer style here. 
+        // Canvas style handles pointer-events: none in CSS, but we ensure it's block here.
+        
         this.container.appendChild(this.renderer.domElement);
 
         this.clock = new THREE.Clock();
@@ -434,52 +420,52 @@ export class MorphingParticles {
             if(this.particleSystem) this.particleSystem.resize();
         };
         
-        // Mouse Handlers
-        this.hoverStartHandler = () => { gsap.to(this, { hoverProgress: 1, duration: 0.5, ease: "power3.out" }); };
-        this.hoverEndHandler = () => { gsap.to(this, { hoverProgress: 0, duration: 0.5, ease: "power3.out" }); };
-        
-        this.mouseMoveHandler = (e) => {
-            if(this.particleSystem) {
-                // Normalize mouse position -1 to 1
-                const rect = this.container.getBoundingClientRect();
-                const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-                const y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-                this.particleSystem.mousePos.set(x, y);
+        // --- GLOBAL INTERACTION LOGIC ---
+        // Since the container might have 'pointer-events: none', we listen on window
+        // and manually check if the mouse is over the container.
+
+        this.interactionHandler = (e) => {
+            if(this.destroyed || !this.container) return;
+
+            let clientX, clientY;
+            if(e.touches && e.touches.length > 0) {
+                clientX = e.touches[0].clientX;
+                clientY = e.touches[0].clientY;
+            } else {
+                clientX = e.clientX;
+                clientY = e.clientY;
             }
-        }
 
-        // Touch Handlers (Mobile)
-        this.touchHandler = (e) => {
-            // e.preventDefault() is handled via touch-action css, 
-            // but we can add it here if strict control is needed, though it blocks scrolling entirely
-            // e.preventDefault(); 
+            const rect = this.container.getBoundingClientRect();
+            
+            // Check if mouse/touch is inside container
+            const isInside = (
+                clientX >= rect.left && 
+                clientX <= rect.right && 
+                clientY >= rect.top && 
+                clientY <= rect.bottom
+            );
 
-            if(e.touches.length > 0 && this.particleSystem) {
-                const touch = e.touches[0];
-                const rect = this.container.getBoundingClientRect();
-                const x = ((touch.clientX - rect.left) / rect.width) * 2 - 1;
-                const y = -((touch.clientY - rect.top) / rect.height) * 2 + 1;
-                this.particleSystem.mousePos.set(x, y);
+            if(isInside) {
+                // Calculate normalized coordinates for the shader
+                const x = ((clientX - rect.left) / rect.width) * 2 - 1;
+                const y = -((clientY - rect.top) / rect.height) * 2 + 1;
                 
-                // Trigger "hover" state when touching
-                gsap.to(this, { hoverProgress: 1, duration: 0.2, ease: "power3.out" });
+                if(this.particleSystem) {
+                    this.particleSystem.mousePos.set(x, y);
+                }
+                // Smoothly transition to hover state
+                gsap.to(this, { hoverProgress: 1, duration: 0.5, ease: "power3.out" });
+            } else {
+                // Smoothly transition out
+                gsap.to(this, { hoverProgress: 0, duration: 0.5, ease: "power3.out" });
             }
-        };
-
-        this.touchEndHandler = () => {
-             // End "hover" state when finger lifted
-             gsap.to(this, { hoverProgress: 0, duration: 0.5, ease: "power3.out" });
         };
 
         window.addEventListener("resize", this.resizeHandler);
-        this.container.addEventListener("mouseenter", this.hoverStartHandler);
-        this.container.addEventListener("mouseleave", this.hoverEndHandler);
-        this.container.addEventListener("mousemove", this.mouseMoveHandler);
-        
-        // Add Passive: false to allow preventing default if we chose to uncomment that
-        this.container.addEventListener("touchstart", this.touchHandler, { passive: false });
-        this.container.addEventListener("touchmove", this.touchHandler, { passive: false });
-        this.container.addEventListener("touchend", this.touchEndHandler);
+        window.addEventListener("mousemove", this.interactionHandler);
+        window.addEventListener("touchstart", this.interactionHandler, { passive: true });
+        window.addEventListener("touchmove", this.interactionHandler, { passive: true });
     }
 
     animate() {
@@ -500,12 +486,10 @@ export class MorphingParticles {
         this.destroyed = true;
         cancelAnimationFrame(this.animationId);
         window.removeEventListener("resize", this.resizeHandler);
-        this.container.removeEventListener("mouseenter", this.hoverStartHandler);
-        this.container.removeEventListener("mouseleave", this.hoverEndHandler);
-        this.container.removeEventListener("mousemove", this.mouseMoveHandler);
-        this.container.removeEventListener("touchstart", this.touchHandler);
-        this.container.removeEventListener("touchmove", this.touchHandler);
-        this.container.removeEventListener("touchend", this.touchEndHandler);
+        window.removeEventListener("mousemove", this.interactionHandler);
+        window.removeEventListener("touchstart", this.interactionHandler);
+        window.removeEventListener("touchmove", this.interactionHandler);
+
         if(this.renderer) {
             this.renderer.dispose();
             this.container.removeChild(this.renderer.domElement);
@@ -526,7 +510,6 @@ class ParticleSystem {
         this.colorScheme = sceneController.theme === "dark" ? 0 : 1;
         this.particleScale = this.renderer.domElement.width / this.parent.pixelRatio / 2e3 * this.parent.particlesScale;
         
-        // Boost particle scale slightly on mobile for visibility since we reduced density
         if(this.parent.isMobile) this.particleScale *= 1.5;
         
         this.initialized = false;
@@ -613,7 +596,11 @@ class ParticleSystem {
 
         this.mesh = new THREE.Points(geometry, this.renderMaterial);
         this.mesh.position.set(0, 0, 0);
-        this.mesh.scale.set(5, -5, 5);
+        
+        // APPLY RESIZE PARAMETER HERE
+        const s = this.parent.vectorSize;
+        this.mesh.scale.set(s, -s, s); // Default was 5
+        
         this.scene.add(this.mesh);
         this.initialized = true;
     }
@@ -736,12 +723,10 @@ class ParticleSystem {
         const deltaTime = this.parent.clock.getElapsedTime() - this.lastTime;
         this.lastTime = this.parent.clock.getElapsedTime();
         
-        // Recalculate scale if needed, mainly for desktop resize
         let currentScale = this.renderer.domElement.width / this.parent.pixelRatio / 2e3 * this.parent.particlesScale;
         if(this.parent.isMobile) currentScale *= 1.5;
         this.particleScale = currentScale;
 
-        // Sim Uniforms
         this.simMaterial.uniforms.uPosition.value = this.everRendered ? this.rt1.texture : this.posTex;
         this.simMaterial.uniforms.uTime.value = this.parent.clock.getElapsedTime();
         this.simMaterial.uniforms.uDeltaTime.value = deltaTime;
