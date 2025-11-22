@@ -1,5 +1,4 @@
 /**
- * Google Antigravity Particles - Standalone JS Version
  * * Usage: 
  * <script type="module" src="path/to/gravity-particles.js"></script>
  */
