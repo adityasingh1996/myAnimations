@@ -1,9 +1,8 @@
 /**
  * Morphing Particles - ES6 Module Version
- * Fixed: Uses direct imports to prevent "THREE is not defined" errors.
+ * Fixed: Robust Library Loader to prevent race conditions on refresh.
  */
 
-// 1. IMPORT THREE.JS DIRECTLY
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.module.js';
 
 // --- SHADER DEFINITIONS ---
@@ -281,21 +280,45 @@ self.onmessage = function(e) {
 
 const linearMap = (n, e, t, i, r) => (n - e) * (r - i) / (t - e) + i;
 
-// --- LOADERS ---
-let libsLoaded = false;
-async function loadLibs() {
-    if (libsLoaded) return;
-    const load = (url) => new Promise((resolve, reject) => {
-        if (document.querySelector(`script[src="${url}"]`)) return resolve();
-        const s = document.createElement('script');
-        s.src = url;
-        s.onload = resolve;
-        s.onerror = reject;
-        document.head.appendChild(s);
+// --- ROBUST SINGLETON LOADER ---
+// Stores the Promise, not just a boolean, so multiple instances wait for the SAME load event.
+let loadPromise = null;
+
+function loadLibs() {
+    if (loadPromise) return loadPromise;
+
+    loadPromise = new Promise(async (resolve, reject) => {
+        const load = (url) => new Promise((res, rej) => {
+            // If script tag exists, it might still be loading. We must wait for onload.
+            let existingScript = document.querySelector(`script[src="${url}"]`);
+            if (existingScript) {
+                // If already loaded (we can't easily check 'loaded' state on script tag, 
+                // so we check the window object that script is supposed to create)
+                if(url.includes('gsap') && window.gsap) return res();
+                if(url.includes('poisson') && window.PoissonDiskSampling) return res();
+                
+                // If not global yet, attach listener to existing script
+                existingScript.addEventListener('load', res);
+                existingScript.addEventListener('error', rej);
+            } else {
+                const s = document.createElement('script');
+                s.src = url;
+                s.onload = res;
+                s.onerror = rej;
+                document.head.appendChild(s);
+            }
+        });
+
+        try {
+            if(!window.gsap) await load('https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js');
+            if(!window.PoissonDiskSampling) await load('https://cdn.jsdelivr.net/gh/kchapelier/poisson-disk-sampling@2.3.1/build/poisson-disk-sampling.min.js');
+            resolve();
+        } catch (err) {
+            reject(err);
+        }
     });
-    if(!window.gsap) await load('https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js');
-    if(!window.PoissonDiskSampling) await load('https://cdn.jsdelivr.net/gh/kchapelier/poisson-disk-sampling@2.3.1/build/poisson-disk-sampling.min.js');
-    libsLoaded = true;
+
+    return loadPromise;
 }
 
 // --- MAIN CLASS ---
@@ -334,11 +357,15 @@ export class MorphingParticles {
     }
 
     async init() {
-        await loadLibs();
-        this.setupScene();
-        this.setupParticles();
-        this.setupEvents();
-        this.animate();
+        try {
+            await loadLibs();
+            this.setupScene();
+            this.setupParticles();
+            this.setupEvents();
+            this.animate();
+        } catch (e) {
+            console.error("Failed to init MorphingParticles:", e);
+        }
     }
 
     setupScene() {
@@ -509,6 +536,12 @@ class ParticleSystem {
     }
 
     createPoints() {
+        // Safety Check for PDS
+        if (typeof PoissonDiskSampling === 'undefined') {
+            console.error("PoissonDiskSampling failed to load.");
+            return;
+        }
+
         const pds = new PoissonDiskSampling({
             shape: [500, 500],
             minDistance: linearMap(this.parent.density, 0, 300, 10, 2),
