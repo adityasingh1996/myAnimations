@@ -864,7 +864,6 @@
         }
 
         // Initialize
-        const container = document.getElementById(CONFIG.containerId);
         new SceneController({
             container: container,
             theme: CONFIG.theme,
