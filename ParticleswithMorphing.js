@@ -1,6 +1,8 @@
 /**
- * Morphing Particles - ES6 Module Version
- * Fixed: Robust Library Loader to prevent race conditions on refresh.
+ * Morphing Particles - Mobile Friendly ES6 Module
+ * * Usage:
+ * import { MorphingParticles } from './morphing_particles.js';
+ * new MorphingParticles({ containerId: 'my-container', ... });
  */
 
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.module.js';
@@ -102,8 +104,12 @@ void main() {
     vec2 disp = vec2(0., 0.);
     vec2 pos = pFrame.xy;
     float distRadius = 0.15;
+    
+    // Interaction logic
     vec2 targetPos = refPos;
+    // Only mix to nearestPos if we are hovering/touching
     targetPos = mix(targetPos, nearestPos, uIsHovering * uIsHovering);
+    
     vec2 direction = normalize(targetPos - pos);
     direction *= .01;
     float dist = length(targetPos - pos);
@@ -115,6 +121,7 @@ void main() {
     float scaleDiff = targetScale - scale;
     scaleDiff *= .1;
     scale += scaleDiff;
+    
     vec2 finalPos = pos + (disp * smoothstep(0.001, distRadius, dist));
     vec2 diff = finalPos - pFrame.xy;
     diff *= .2;
@@ -328,7 +335,19 @@ export class MorphingParticles {
         this.containerId = options.containerId;
         this.imageUrl = options.imageUrl || "https://iili.io/f3MM7VV.md.png";
         this.theme = options.theme || "light";
-        this.density = options.density || 130;
+        
+        // MOBILE DETECT & OPTIMIZATION
+        this.isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
+
+        // Base density
+        let baseDensity = options.density || 130;
+        
+        // Reduce density heavily on mobile for performance
+        if(this.isMobile) {
+            baseDensity = Math.min(baseDensity, 80); 
+        }
+        this.density = baseDensity;
+
         this.particlesScale = options.particlesScale || 0.5;
         this.cameraZoom = options.cameraZoom || 7.5;
 
@@ -337,6 +356,9 @@ export class MorphingParticles {
             console.error(`MorphingParticles: Container #${this.containerId} not found.`);
             return;
         }
+
+        // OPTIMIZATION: Prevent scrolling when touching the canvas
+        this.injectStyles();
 
         this.scene = null;
         this.camera = null;
@@ -356,6 +378,13 @@ export class MorphingParticles {
         this.init();
     }
 
+    injectStyles() {
+        if(this.container) {
+            this.container.style.touchAction = 'none'; // Critical for mobile interaction
+            this.container.style.cursor = 'pointer';
+        }
+    }
+
     async init() {
         try {
             await loadLibs();
@@ -370,13 +399,18 @@ export class MorphingParticles {
 
     setupScene() {
         this.scene = new THREE.Scene();
-        this.pixelRatio = window.devicePixelRatio;
+        
+        // MOBILE OPTIMIZATION: Cap Pixel Ratio
+        // Retina screens (3x) kill performance with shaders. Cap at 1.5 or 2 for mobile.
+        const maxPixelRatio = this.isMobile ? 1.5 : window.devicePixelRatio;
+        this.pixelRatio = Math.min(window.devicePixelRatio, maxPixelRatio);
+        
         this.camera = new THREE.PerspectiveCamera(40, this.container.offsetWidth / this.container.offsetHeight, 0.1, 1000);
         this.camera.position.z = this.cameraZoom;
 
         this.renderer = new THREE.WebGLRenderer({
             alpha: true,
-            antialias: true,
+            antialias: !this.isMobile, // Disable AA on mobile for performance
             powerPreference: "high-performance"
         });
         this.renderer.setSize(this.container.offsetWidth, this.container.offsetHeight);
@@ -399,12 +433,53 @@ export class MorphingParticles {
             this.camera.updateProjectionMatrix();
             if(this.particleSystem) this.particleSystem.resize();
         };
+        
+        // Mouse Handlers
         this.hoverStartHandler = () => { gsap.to(this, { hoverProgress: 1, duration: 0.5, ease: "power3.out" }); };
         this.hoverEndHandler = () => { gsap.to(this, { hoverProgress: 0, duration: 0.5, ease: "power3.out" }); };
+        
+        this.mouseMoveHandler = (e) => {
+            if(this.particleSystem) {
+                // Normalize mouse position -1 to 1
+                const rect = this.container.getBoundingClientRect();
+                const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+                const y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+                this.particleSystem.mousePos.set(x, y);
+            }
+        }
+
+        // Touch Handlers (Mobile)
+        this.touchHandler = (e) => {
+            // e.preventDefault() is handled via touch-action css, 
+            // but we can add it here if strict control is needed, though it blocks scrolling entirely
+            // e.preventDefault(); 
+
+            if(e.touches.length > 0 && this.particleSystem) {
+                const touch = e.touches[0];
+                const rect = this.container.getBoundingClientRect();
+                const x = ((touch.clientX - rect.left) / rect.width) * 2 - 1;
+                const y = -((touch.clientY - rect.top) / rect.height) * 2 + 1;
+                this.particleSystem.mousePos.set(x, y);
+                
+                // Trigger "hover" state when touching
+                gsap.to(this, { hoverProgress: 1, duration: 0.2, ease: "power3.out" });
+            }
+        };
+
+        this.touchEndHandler = () => {
+             // End "hover" state when finger lifted
+             gsap.to(this, { hoverProgress: 0, duration: 0.5, ease: "power3.out" });
+        };
 
         window.addEventListener("resize", this.resizeHandler);
         this.container.addEventListener("mouseenter", this.hoverStartHandler);
         this.container.addEventListener("mouseleave", this.hoverEndHandler);
+        this.container.addEventListener("mousemove", this.mouseMoveHandler);
+        
+        // Add Passive: false to allow preventing default if we chose to uncomment that
+        this.container.addEventListener("touchstart", this.touchHandler, { passive: false });
+        this.container.addEventListener("touchmove", this.touchHandler, { passive: false });
+        this.container.addEventListener("touchend", this.touchEndHandler);
     }
 
     animate() {
@@ -427,6 +502,10 @@ export class MorphingParticles {
         window.removeEventListener("resize", this.resizeHandler);
         this.container.removeEventListener("mouseenter", this.hoverStartHandler);
         this.container.removeEventListener("mouseleave", this.hoverEndHandler);
+        this.container.removeEventListener("mousemove", this.mouseMoveHandler);
+        this.container.removeEventListener("touchstart", this.touchHandler);
+        this.container.removeEventListener("touchmove", this.touchHandler);
+        this.container.removeEventListener("touchend", this.touchEndHandler);
         if(this.renderer) {
             this.renderer.dispose();
             this.container.removeChild(this.renderer.domElement);
@@ -443,9 +522,13 @@ class ParticleSystem {
         this.textures = textureUrls;
         this.lastTime = 0;
         this.everRendered = false;
-        this.mousePos = new THREE.Vector2(0,0);
+        this.mousePos = new THREE.Vector2(999,999);
         this.colorScheme = sceneController.theme === "dark" ? 0 : 1;
         this.particleScale = this.renderer.domElement.width / this.parent.pixelRatio / 2e3 * this.parent.particlesScale;
+        
+        // Boost particle scale slightly on mobile for visibility since we reduced density
+        if(this.parent.isMobile) this.particleScale *= 1.5;
+        
         this.initialized = false;
     }
 
@@ -536,7 +619,6 @@ class ParticleSystem {
     }
 
     createPoints() {
-        // Safety Check for PDS
         if (typeof PoissonDiskSampling === 'undefined') {
             console.error("PoissonDiskSampling failed to load.");
             return;
@@ -653,7 +735,11 @@ class ParticleSystem {
         if (!this.initialized) return;
         const deltaTime = this.parent.clock.getElapsedTime() - this.lastTime;
         this.lastTime = this.parent.clock.getElapsedTime();
-        this.particleScale = this.renderer.domElement.width / this.parent.pixelRatio / 2e3 * this.parent.particlesScale;
+        
+        // Recalculate scale if needed, mainly for desktop resize
+        let currentScale = this.renderer.domElement.width / this.parent.pixelRatio / 2e3 * this.parent.particlesScale;
+        if(this.parent.isMobile) currentScale *= 1.5;
+        this.particleScale = currentScale;
 
         // Sim Uniforms
         this.simMaterial.uniforms.uPosition.value = this.everRendered ? this.rt1.texture : this.posTex;
