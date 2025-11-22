@@ -130,8 +130,8 @@ class GravityParticles {
 
         this.colorControls = {
             color1: "#2c64ed",
-            color2: "#ffffff",
-            color3: "#ffffff"
+            color2: "#617ff4",
+            color3: "#517ffc"
         };
         
         this.pixelRatio = window.devicePixelRatio;
