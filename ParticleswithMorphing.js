@@ -1,7 +1,7 @@
 /**
  * Morphing Particles Widget
  * * Usage: 
- * <div id="morphing-particles-container" style="width: 100%; height: 100vh;"></div>
+ * <div id="morphing-particles-container" style="width: 100vw; height: 100vh;"></div>
  * <script src="path/to/morphing-particles.js"></script>
  * * Optional: You can configure it by setting a global variable before loading the script:
  * window.MORPHING_CONFIG = {
@@ -26,11 +26,23 @@
     // ----------------------------------------------------------------
     function injectStyles() {
         const css = `
+            /* GLOBAL RESET: Essential for full-screen animations */
+            body, html {
+                margin: 0;
+                padding: 0;
+                width: 100%;
+                height: 100%;
+                overflow: hidden; /* Prevents scrollbars */
+            }
+
             #${CONFIG.containerId} {
                 position: relative;
-                overflow: hidden;
-                background-color: #FFFFFF; 
+                width: 100%;
+                height: 100%;
+                background-color: #FFFFFF;
+                display: block; /* Removes whitespace under canvas */
             }
+
             .mp-loading {
                 position: absolute;
                 top: 50%;
@@ -83,6 +95,7 @@
     function startApp() {
         
         // --- ADD LOADING INDICATOR ---
+        // Retrieve the container defined in CONFIG (defaults to 'morphing-particles-container')
         const container = document.getElementById(CONFIG.containerId);
         if (!container) {
             console.error(`MorphingParticles: Container #${CONFIG.containerId} not found.`);
