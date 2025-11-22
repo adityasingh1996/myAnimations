@@ -28,8 +28,8 @@
         const css = `
             /* GLOBAL RESET: Essential for full-screen animations */
             body, html {
-                margin: 0;
-                padding: 0;
+                margin: 0 !important;
+                padding: 0 !important;
                 width: 100%;
                 height: 100%;
                 overflow: hidden; /* Prevents scrollbars */
@@ -41,20 +41,6 @@
                 height: 100%;
                 background-color: #FFFFFF;
                 display: block; /* Removes whitespace under canvas */
-            }
-
-            .mp-loading {
-                position: absolute;
-                top: 50%;
-                left: 50%;
-                transform: translate(-50%, -50%);
-                font-family: 'Open Sans', sans-serif;
-                font-size: 20px;
-                letter-spacing: -0.05px;
-                pointer-events: none;
-                z-index: 10;
-                font-weight: 300;
-                color: #121317;
             }
         `;
         const styleSheet = document.createElement("style");
@@ -102,10 +88,12 @@
             return;
         }
         
+        /* --- REMOVED LOADING INDICATOR ---
         const loader = document.createElement('div');
         loader.className = 'mp-loading';
         loader.innerText = 'Generating Particles...';
         container.appendChild(loader);
+        */
 
 
         // --- SHADER DEFINITIONS ---
@@ -828,9 +816,11 @@
                 // Initialize Particles
                 this.particles = await MorphingParticles.create(this, this.textures);
                 
+                /* --- REMOVED LOADING INDICATOR HIDE ---
                 // Remove Loading Text
                 const loading = document.querySelector('.mp-loading');
                 if(loading) loading.style.display = 'none';
+                */
 
                 // Events
                 window.addEventListener("resize", () => this.onWindowResize());
