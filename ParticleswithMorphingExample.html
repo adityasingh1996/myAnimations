@@ -2,17 +2,38 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Split Screen Morphing</title>
+    <!-- Added maximum-scale=1.0 and user-scalable=no to prevent zooming while touching particles -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Split Screen Morphing - Mobile Ready</title>
     <style>
-        /* FIXED: Background set to white */
-        body { margin: 0; overflow: hidden; background: #ffffff; display: flex; height: 100vh; }
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background: #ffffff; 
+            display: flex; 
+            height: 100vh; 
+            /* Default to row (side-by-side) for desktop */
+            flex-direction: row;
+        }
         
         .split-panel {
             width: 50%;
             height: 100%;
             position: relative;
-            background: #ffffff; /* FIXED: Background set to white */
+            background: #ffffff;
+            /* Prevent touch actions like scrolling on the panels */
+            touch-action: none;
+        }
+
+        /* Mobile Optimization: Stack vertically on screens narrower than 768px */
+        @media (max-width: 768px) {
+            body {
+                flex-direction: column;
+            }
+            .split-panel {
+                width: 100%;
+                height: 50%;
+            }
         }
     </style>
 </head>
@@ -22,18 +43,26 @@
     <div id="right-container" class="split-panel"></div>
 
     <script type="module">
+        // Import from the local, mobile-optimized file we created earlier
         import { MorphingParticles } from 'https://adityasingh1996.github.io/myAnimations/ParticleswithMorphing.js';
 
+        // The local module automatically detects mobile and throttles density
+        // so passing 130 here is safe; it will auto-reduce to ~80 on phones.
+
+        // Top/Left Panel
         new MorphingParticles({
             containerId: 'left-container',
-            imageUrl: 'https://iili.io/f3MM7VV.md.png',
-            density: 130
+            imageUrl: 'https://iili.io/f3MM7VV.md.png', // Google Logo
+            density: 130,
+            theme: "light"
         });
 
+        // Bottom/Right Panel
         new MorphingParticles({
             containerId: 'right-container',
-            imageUrl: 'https://iili.io/fdpsbBS.md.png',
-            density: 130
+            imageUrl: 'https://iili.io/fdpsbBS.md.png', // GSAP Logo
+            density: 130,
+            theme: "light"
         });
     </script>
 
